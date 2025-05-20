@@ -1,0 +1,136 @@
+import machine
+import time
+
+# Constants
+TRIGGER_PULSE_DURATION = 10  # microseconds
+SOUND_SPEED = 340.29  # m/s
+BLINK_DURATION = 0.5  # seconds
+
+# Ultrasonic sensor pin configurations
+ultrasonic_pins = [
+    {"trigger": 5, "echo": 18},
+    {"trigger": 17, "echo": 16},
+    {"trigger": 4, "echo": 15}
+]
+
+# Sound sensor pins
+sound_sensor_pins = [34, 35, 32]
+
+# Traffic light pin configurations
+traffic_light_pins = [
+    {"red": 19, "yellow": 21, "green": 22},
+    {"red": 23, "yellow": 25, "green": 26},
+    {"red": 27, "yellow": 14, "green": 13}
+]
+
+# Setup ultrasonic sensors
+ultrasonics = []
+for pins in ultrasonic_pins:
+    trigger_pin = machine.Pin(pins["trigger"], machine.Pin.OUT)
+    echo_pin = machine.Pin(pins["echo"], machine.Pin.IN)
+    ultrasonics.append({"trigger": trigger_pin, "echo": echo_pin})
+
+# Setup sound sensors
+sound_sensors = [machine.Pin(pin, machine.Pin.IN) for pin in sound_sensor_pins]
+
+# Setup traffic light pins
+traffic_lights = []
+for pins in traffic_light_pins:
+    red = machine.Pin(pins["red"], machine.Pin.OUT)
+    yellow = machine.Pin(pins["yellow"], machine.Pin.OUT)
+    green = machine.Pin(pins["green"], machine.Pin.OUT)
+    traffic_lights.append({"red": red, "yellow": yellow, "green": green})
+
+# Function to measure distance using ultrasonic sensor
+def measure_distance(trigger, echo):
+    trigger.off()
+    time.sleep_us(2)
+    trigger.on()
+    time.sleep_us(TRIGGER_PULSE_DURATION)
+    trigger.off()
+
+    timeout = time.ticks_us()
+    while echo.value() == 0:
+        if time.ticks_diff(time.ticks_us(), timeout) > 1000000:
+            return None
+    start = time.ticks_us()
+    while echo.value() == 1:
+        if time.ticks_diff(time.ticks_us(), start) > 1000000:
+            return None
+    end = time.ticks_us()
+    duration = time.ticks_diff(end, start)
+    distance = (duration / 2) * (SOUND_SPEED / 1000000)
+    return distance
+
+# Detect emergency vehicle based on sound
+def detect_emergency():
+    return any(sensor.value() == 1 for sensor in sound_sensors)
+
+# Reset all traffic lights to off
+def reset_all_traffic_lights():
+    for light in traffic_lights:
+        light["red"].off()
+        light["yellow"].off()
+        light["green"].off()
+
+# Set traffic light to a specific state
+def set_traffic_light(index, state):
+    for i, light in enumerate(traffic_lights):
+        if i == index:
+            if state == "red":
+                light["red"].on()
+                light["yellow"].off()
+                light["green"].off()
+            elif state == "yellow":
+                light["red"].off()
+                light["yellow"].on()
+                light["green"].off()
+            elif state == "green":
+                light["red"].off()
+                light["yellow"].off()
+                light["green"].on()
+        else:
+            # All other lights red
+            light["red"].on()
+            light["yellow"].off()
+            light["green"].off()
+
+# Blink specific traffic light
+def blink_traffic_light(index, state, duration):
+    end_time = time.time() + duration
+    while time.time() < end_time:
+        set_traffic_light(index, state)
+        time.sleep(BLINK_DURATION)
+        reset_all_traffic_lights()
+        time.sleep(BLINK_DURATION)
+
+# Main loop
+def main():
+    while True:
+        distances = [measure_distance(u["trigger"], u["echo"]) for u in ultrasonics]
+
+        for i, distance in enumerate(distances):
+            if distance is None:
+                print(f"[Sensor {i}] Measurement failed.")
+                continue
+
+            print(f"[Sensor {i}] Distance: {distance:.2f} meters")
+
+            if distance < 0.2:
+                blink_traffic_light(i, "red", 5)
+                print(f"🔴 Congestion at sensor {i}")
+            elif distance < 0.5:
+                blink_traffic_light(i, "yellow", 5)
+                print(f"🟡 Warning at sensor {i}")
+            else:
+                blink_traffic_light(i, "green", 5)
+                print(f"🟢 Clear road at sensor {i}")
+
+        if detect_emergency():
+            print("🚨 Emergency vehicle detected!")
+        else:
+            print("✅ No emergency vehicle detected.")
+
+        time.sleep(1)
+
+main()
